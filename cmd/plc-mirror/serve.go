@@ -17,7 +17,7 @@ import (
 	ssi "github.com/nuts-foundation/go-did"
 	"github.com/nuts-foundation/go-did/did"
 
-	"github.com/bluesky-social/indigo/atproto/crypto"
+	"github.com/bluesky-social/indigo/atproto/atcrypto"
 
 	"bsky.watch/plc-mirror/util/plc"
 )
@@ -142,13 +142,13 @@ func (s *Server) serve(ctx context.Context, req *http.Request) convreq.HttpRespo
 			PublicKeyMultibase: strings.TrimPrefix(m, "did:key:"),
 		})
 
-		key, err := crypto.ParsePublicDIDKey(m)
+		key, err := atcrypto.ParsePublicDIDKey(m)
 		if err == nil {
 			context := ""
 			switch key.(type) {
-			case *crypto.PublicKeyK256:
+			case *atcrypto.PublicKeyK256:
 				context = "https://w3id.org/security/suites/secp256k1-2019/v1"
-			case *crypto.PublicKeyP256:
+			case *atcrypto.PublicKeyP256:
 				context = "https://w3id.org/security/suites/ecdsa-2019/v1"
 			}
 			if context != "" && !slices.Contains(r.Context, interface{}(context)) {

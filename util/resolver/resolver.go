@@ -7,8 +7,8 @@ import (
 	"net/url"
 	"os"
 
-	"github.com/bluesky-social/indigo/api"
 	"github.com/bluesky-social/indigo/did"
+	"github.com/bluesky-social/indigo/plc"
 	"github.com/rs/zerolog"
 )
 
@@ -22,8 +22,8 @@ func init() {
 	}
 	resolver.AddHandler("plc", &fallbackResolver{
 		resolvers: []did.Resolver{
-			&api.PLCServer{Host: plcAddr},
-			&api.PLCServer{Host: "https://plc.directory"},
+			&plc.PLCServer{Host: plcAddr},
+			&plc.PLCServer{Host: "https://plc.directory"},
 		}})
 	resolver.AddHandler("web", &did.WebResolver{})
 
@@ -45,8 +45,8 @@ func (r *fallbackResolver) GetDocument(ctx context.Context, didstr string) (*did
 		if d, err := res.GetDocument(ctx, didstr); err == nil {
 			return d, nil
 		} else {
-			log.Trace().Err(err).Str("plc", res.(*api.PLCServer).Host).
-				Msgf("Failed to resolve %q using %q: %s", didstr, res.(*api.PLCServer).Host, err)
+			log.Trace().Err(err).Str("plc", res.(*plc.PLCServer).Host).
+				Msgf("Failed to resolve %q using %q: %s", didstr, res.(*plc.PLCServer).Host, err)
 			errs = append(errs, err)
 		}
 	}
