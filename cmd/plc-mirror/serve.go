@@ -76,6 +76,9 @@ func (s *Server) serve(ctx context.Context, req *http.Request) convreq.HttpRespo
 		// Check LastCompletion and if it's recent enough - that means
 		// that we're actually caught up and there simply aren't any recent
 		// PLC operations.
+		//
+		// XXX: non-leader instances won't know LastCompletion and will start
+		// returning errors.
 		completionDelay := time.Since(s.mirror.LastCompletion())
 		if completionDelay > s.MaxDelay {
 			updateMetrics(http.StatusServiceUnavailable)

@@ -18,6 +18,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"bsky.watch/plc-mirror/models"
+	"bsky.watch/plc-mirror/util/pglock"
 	"bsky.watch/plc-mirror/util/plc"
 )
 
@@ -41,16 +42,17 @@ type PLCLogEntry struct {
 
 type Mirror struct {
 	db       *gorm.DB
+	dbUrl    string
 	upstream *url.URL
 	limiter  *rate.Limiter
+	lockID   int64
 
 	mu                      sync.RWMutex
 	lastCompletionTimestamp time.Time
-	lastRecordTimestamp     time.Time
 }
 
-func NewMirror(ctx context.Context, upstream string, db *gorm.DB) (*Mirror, error) {
-	u, err := url.Parse(upstream)
+func NewMirror(ctx context.Context, cfg Config, db *gorm.DB) (*Mirror, error) {
+	u, err := url.Parse(cfg.Upstream)
 	if err != nil {
 		return nil, err
 	}
@@ -58,19 +60,22 @@ func NewMirror(ctx context.Context, upstream string, db *gorm.DB) (*Mirror, erro
 	if err != nil {
 		return nil, err
 	}
-	return &Mirror{
+	r := &Mirror{
 		db:       db,
 		upstream: u,
 		limiter:  rate.NewLimiter(defaultRateLimit, 4),
-	}, nil
+		lockID:   cfg.LockID,
+		dbUrl:    cfg.DBUrl,
+	}
+	return r, nil
 }
 
-func (m *Mirror) Start(ctx context.Context) error {
-	go m.run(ctx)
+func (m *Mirror) Start(ctx context.Context, leaderLock *pglock.Lock) error {
+	go m.run(ctx, leaderLock)
 	return nil
 }
 
-func (m *Mirror) run(ctx context.Context) {
+func (m *Mirror) run(ctx context.Context, leaderLock *pglock.Lock) {
 	log := zerolog.Ctx(ctx).With().Str("module", "mirror").Logger()
 	for {
 		select {
@@ -78,17 +83,41 @@ func (m *Mirror) run(ctx context.Context) {
 			log.Info().Msgf("PLC mirror stopped")
 			return
 		default:
-			if err := m.runOnce(ctx); err != nil {
-				if ctx.Err() == nil {
-					log.Error().Err(err).Msgf("Failed to get new log entries from PLC: %s", err)
-				}
-			} else {
-				now := time.Now()
-				m.mu.Lock()
-				m.lastCompletionTimestamp = now
-				m.mu.Unlock()
+			isLeader, err := leaderLock.Check(ctx)
+			if err != nil {
+				log.Error().Err(err).Msgf("Failed to check leader election status: %s", err)
+
+				leaderLock.Reset(ctx)
+
+				time.Sleep(10 * time.Second)
+				break
 			}
-			time.Sleep(10 * time.Second)
+
+			if !isLeader {
+				r, err := leaderLock.LockWithTimeout(ctx, 10*time.Second)
+				if err != nil {
+					log.Error().Err(err).Msgf("Failed to acquire leader lock: %s", err)
+					break
+				}
+				isLeader = r
+				if isLeader {
+					log.Info().Msgf("Became the leader")
+				}
+			}
+
+			if isLeader {
+				if err := m.runOnce(ctx, leaderLock); err != nil {
+					if ctx.Err() == nil {
+						log.Error().Err(err).Msgf("Failed to get new log entries from PLC: %s", err)
+					}
+				} else {
+					now := time.Now()
+					m.mu.Lock()
+					m.lastCompletionTimestamp = now
+					m.mu.Unlock()
+				}
+				time.Sleep(10 * time.Second)
+			}
 		}
 	}
 }
@@ -100,13 +129,6 @@ func (m *Mirror) LastCompletion() time.Time {
 }
 
 func (m *Mirror) LastRecordTimestamp(ctx context.Context) (time.Time, error) {
-	m.mu.RLock()
-	t := m.lastRecordTimestamp
-	m.mu.RUnlock()
-	if !t.IsZero() {
-		return t, nil
-	}
-
 	ts := ""
 	err := m.db.WithContext(ctx).Model(&PLCLogEntry{}).Select("plc_timestamp").Order("plc_timestamp desc").Limit(1).Take(&ts).Error
 	if err != nil {
@@ -115,15 +137,6 @@ func (m *Mirror) LastRecordTimestamp(ctx context.Context) (time.Time, error) {
 	dbTimestamp, err := time.Parse(time.RFC3339, ts)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("parsing timestamp %q: %w", ts, err)
-	}
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.lastRecordTimestamp.IsZero() {
-		m.lastRecordTimestamp = dbTimestamp
-	}
-	if m.lastRecordTimestamp.After(dbTimestamp) {
-		return m.lastRecordTimestamp, nil
 	}
 	return dbTimestamp, nil
 }
@@ -139,7 +152,7 @@ func (m *Mirror) updateRateLimit(lastRecordTimestamp time.Time) {
 	}
 }
 
-func (m *Mirror) runOnce(ctx context.Context) error {
+func (m *Mirror) runOnce(ctx context.Context, leaderLock *pglock.Lock) error {
 	log := zerolog.Ctx(ctx)
 
 	cursor := ""
@@ -216,6 +229,15 @@ func (m *Mirror) runOnce(ctx context.Context) error {
 			break
 		}
 
+		isLeader, err := leaderLock.Check(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to check leadership status: %w", err)
+		}
+		if !isLeader {
+			log.Warn().Msgf("Lost leadership status")
+			return nil
+		}
+
 		err = m.db.Clauses(
 			clause.OnConflict{
 				Columns:   []clause.Column{{Name: "did"}, {Name: "cid"}},
@@ -227,10 +249,6 @@ func (m *Mirror) runOnce(ctx context.Context) error {
 		}
 
 		if !lastTimestamp.IsZero() {
-			m.mu.Lock()
-			m.lastRecordTimestamp = lastTimestamp
-			m.mu.Unlock()
-
 			m.updateRateLimit(lastTimestamp)
 		}
 

@@ -28,6 +28,7 @@ import (
 	"gorm.io/gorm/logger"
 
 	"bsky.watch/plc-mirror/util/gormzerolog"
+	"bsky.watch/plc-mirror/util/pglock"
 )
 
 type Config struct {
@@ -37,6 +38,10 @@ type Config struct {
 	MetricsPort string `split_words:"true"`
 	DBUrl       string `envconfig:"POSTGRES_URL"`
 	Upstream    string `default:"https://plc.directory"`
+	LockID      int64  `default:"6515824"`
+
+	// Default LockID value:
+	// ASCII "plc" -> 0x70 0x6c 0x63 -> ntohs() -> 0x636c70 -> 6515824
 }
 
 var config Config
@@ -77,11 +82,15 @@ func runMain(ctx context.Context) error {
 	}
 	log.Debug().Msgf("DB schema updated")
 
-	mirror, err := NewMirror(ctx, config.Upstream, db)
+	leaderLock, err := pglock.New(conn, config.LockID)
+	if err != nil {
+		return fmt.Errorf("failed to create leader lock: %w", err)
+	}
+	mirror, err := NewMirror(ctx, config, db)
 	if err != nil {
 		return fmt.Errorf("failed to create mirroring worker: %w", err)
 	}
-	if err := mirror.Start(ctx); err != nil {
+	if err := mirror.Start(ctx, leaderLock); err != nil {
 		return fmt.Errorf("failed to start mirroring worker: %w", err)
 	}
 
