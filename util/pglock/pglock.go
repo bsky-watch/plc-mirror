@@ -59,10 +59,12 @@ func (l *Lock) TryLock(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("acquiring lock: %w", err)
 	}
-	l.lockCount++
+	if result {
+		l.lockCount++
+		return true, nil
+	}
 
-	return result, nil
-
+	return false, nil
 }
 
 func (l *Lock) LockWithTimeout(ctx context.Context, timeout time.Duration) (bool, error) {
