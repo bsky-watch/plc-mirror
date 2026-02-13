@@ -43,6 +43,28 @@ func (l *Lock) Lock(ctx context.Context) error {
 	return nil
 }
 
+func (l *Lock) TryLock(ctx context.Context) (bool, error) {
+	if l.conn == nil {
+		conn, err := l.pool.Acquire(ctx)
+		if err != nil {
+			return false, err
+		}
+		l.conn = conn
+		l.lockCount = 0
+		l.err = nil
+	}
+
+	var result bool
+	err := l.conn.QueryRow(ctx, "select pg_try_advisory_lock($1)", l.lockID).Scan(&result)
+	if err != nil {
+		return false, fmt.Errorf("acquiring lock: %w", err)
+	}
+	l.lockCount++
+
+	return result, nil
+
+}
+
 func (l *Lock) LockWithTimeout(ctx context.Context, timeout time.Duration) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

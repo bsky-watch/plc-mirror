@@ -94,7 +94,7 @@ func (m *Mirror) run(ctx context.Context, leaderLock *pglock.Lock) {
 			}
 
 			if !isLeader {
-				r, err := leaderLock.LockWithTimeout(ctx, 10*time.Second)
+				r, err := leaderLock.TryLock(ctx)
 				if err != nil {
 					log.Error().Err(err).Msgf("Failed to acquire leader lock: %s", err)
 					break
@@ -102,6 +102,8 @@ func (m *Mirror) run(ctx context.Context, leaderLock *pglock.Lock) {
 				isLeader = r
 				if isLeader {
 					log.Info().Msgf("Became the leader")
+				} else {
+					time.Sleep(10 * time.Second)
 				}
 			}
 
