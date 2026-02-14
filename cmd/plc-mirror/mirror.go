@@ -16,7 +16,7 @@ import (
 	"golang.org/x/time/rate"
 	"gorm.io/gorm"
 
-	v1 "bsky.watch/plc-mirror/schema/v1"
+	"bsky.watch/plc-mirror/schema"
 	"bsky.watch/plc-mirror/util/pglock"
 	"bsky.watch/plc-mirror/util/plc"
 )
@@ -29,7 +29,7 @@ const (
 )
 
 type Mirror struct {
-	db       *v1.Database
+	db       schema.Database
 	dbUrl    string
 	upstream *url.URL
 	limiter  *rate.Limiter
@@ -39,7 +39,7 @@ type Mirror struct {
 	lastCompletionTimestamp time.Time
 }
 
-func NewMirror(ctx context.Context, cfg Config, db *v1.Database) (*Mirror, error) {
+func NewMirror(ctx context.Context, cfg Config, db schema.Database) (*Mirror, error) {
 	u, err := url.Parse(cfg.Upstream)
 	if err != nil {
 		return nil, err

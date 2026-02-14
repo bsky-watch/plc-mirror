@@ -27,7 +27,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	v1 "bsky.watch/plc-mirror/schema/v1"
+	"bsky.watch/plc-mirror/schema"
 	"bsky.watch/plc-mirror/util/gormzerolog"
 	"bsky.watch/plc-mirror/util/pglock"
 )
@@ -65,7 +65,7 @@ func runMain(ctx context.Context) error {
 
 	sqldb := stdlib.OpenDBFromPool(conn)
 
-	db, err := gorm.Open(postgres.New(postgres.Config{
+	gormDB, err := gorm.Open(postgres.New(postgres.Config{
 		Conn: sqldb,
 	}), &gorm.Config{
 		Logger: gormzerolog.New(&logger.Config{
@@ -78,16 +78,16 @@ func runMain(ctx context.Context) error {
 	}
 	log.Debug().Msgf("DB connection established")
 
-	if err := v1.AutoMigrate(db); err != nil {
-		return fmt.Errorf("auto-migrating DB schema: %w", err)
+	db, err := schema.DetectVersion(ctx, gormDB)
+	if err != nil {
+		return err
 	}
-	log.Debug().Msgf("DB schema updated")
 
 	leaderLock, err := pglock.New(conn, config.LockID)
 	if err != nil {
 		return fmt.Errorf("failed to create leader lock: %w", err)
 	}
-	mirror, err := NewMirror(ctx, config, v1.New(db))
+	mirror, err := NewMirror(ctx, config, db)
 	if err != nil {
 		return fmt.Errorf("failed to create mirroring worker: %w", err)
 	}
@@ -95,7 +95,7 @@ func runMain(ctx context.Context) error {
 		return fmt.Errorf("failed to start mirroring worker: %w", err)
 	}
 
-	server, err := NewServer(ctx, v1.New(db), mirror)
+	server, err := NewServer(ctx, db, mirror)
 	if err != nil {
 		return fmt.Errorf("failed to create server: %w", err)
 	}

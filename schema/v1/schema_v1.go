@@ -29,8 +29,8 @@ func New(db *gorm.DB) *Database {
 	return &Database{db: db}
 }
 
-func AutoMigrate(db *gorm.DB) error {
-	return db.AutoMigrate(&PLCLogEntry{})
+func (d *Database) AutoMigrate() error {
+	return d.db.AutoMigrate(&PLCLogEntry{})
 }
 
 func (d *Database) HeadTimestamp(ctx context.Context) (string, error) {

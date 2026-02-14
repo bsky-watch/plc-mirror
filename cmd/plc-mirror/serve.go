@@ -19,12 +19,12 @@ import (
 
 	"github.com/bluesky-social/indigo/atproto/atcrypto"
 
-	v1 "bsky.watch/plc-mirror/schema/v1"
+	"bsky.watch/plc-mirror/schema"
 	"bsky.watch/plc-mirror/util/plc"
 )
 
 type Server struct {
-	db     *v1.Database
+	db     schema.Database
 	mirror *Mirror
 
 	MaxDelay time.Duration
@@ -32,7 +32,7 @@ type Server struct {
 	handler http.HandlerFunc
 }
 
-func NewServer(ctx context.Context, db *v1.Database, mirror *Mirror) (*Server, error) {
+func NewServer(ctx context.Context, db schema.Database, mirror *Mirror) (*Server, error) {
 	s := &Server{
 		db:       db,
 		mirror:   mirror,
