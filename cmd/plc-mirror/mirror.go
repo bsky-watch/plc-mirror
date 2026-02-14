@@ -149,11 +149,15 @@ func (m *Mirror) runOnce(ctx context.Context, leaderLock *pglock.Lock) error {
 		return fmt.Errorf("failed to get the cursor: %w", err)
 	}
 
-	cursorTimestamp, err := time.Parse(time.RFC3339, cursor)
 	if err != nil {
-		log.Error().Err(err).Msgf("parsing timestamp %q: %s", cursor, err)
+		cursor = ""
 	} else {
-		m.updateRateLimit(cursorTimestamp)
+		cursorTimestamp, err := time.Parse(time.RFC3339, cursor)
+		if err != nil {
+			log.Error().Err(err).Msgf("parsing timestamp %q: %s", cursor, err)
+		} else {
+			m.updateRateLimit(cursorTimestamp)
+		}
 	}
 
 	u := *m.upstream
