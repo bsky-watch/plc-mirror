@@ -27,6 +27,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
+	v1 "bsky.watch/plc-mirror/schema/v1"
 	"bsky.watch/plc-mirror/util/gormzerolog"
 	"bsky.watch/plc-mirror/util/pglock"
 )
@@ -77,7 +78,7 @@ func runMain(ctx context.Context) error {
 	}
 	log.Debug().Msgf("DB connection established")
 
-	if err := db.AutoMigrate(&PLCLogEntry{}); err != nil {
+	if err := v1.AutoMigrate(db); err != nil {
 		return fmt.Errorf("auto-migrating DB schema: %w", err)
 	}
 	log.Debug().Msgf("DB schema updated")
@@ -86,7 +87,7 @@ func runMain(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to create leader lock: %w", err)
 	}
-	mirror, err := NewMirror(ctx, config, db)
+	mirror, err := NewMirror(ctx, config, v1.New(db))
 	if err != nil {
 		return fmt.Errorf("failed to create mirroring worker: %w", err)
 	}
@@ -94,7 +95,7 @@ func runMain(ctx context.Context) error {
 		return fmt.Errorf("failed to start mirroring worker: %w", err)
 	}
 
-	server, err := NewServer(ctx, db, mirror)
+	server, err := NewServer(ctx, v1.New(db), mirror)
 	if err != nil {
 		return fmt.Errorf("failed to create server: %w", err)
 	}

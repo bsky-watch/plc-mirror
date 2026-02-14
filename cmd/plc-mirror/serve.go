@@ -19,11 +19,12 @@ import (
 
 	"github.com/bluesky-social/indigo/atproto/atcrypto"
 
+	v1 "bsky.watch/plc-mirror/schema/v1"
 	"bsky.watch/plc-mirror/util/plc"
 )
 
 type Server struct {
-	db     *gorm.DB
+	db     *v1.Database
 	mirror *Mirror
 
 	MaxDelay time.Duration
@@ -31,7 +32,7 @@ type Server struct {
 	handler http.HandlerFunc
 }
 
-func NewServer(ctx context.Context, db *gorm.DB, mirror *Mirror) (*Server, error) {
+func NewServer(ctx context.Context, db *v1.Database, mirror *Mirror) (*Server, error) {
 	s := &Server{
 		db:       db,
 		mirror:   mirror,
@@ -88,8 +89,7 @@ func (s *Server) serve(ctx context.Context, req *http.Request) convreq.HttpRespo
 	log := zerolog.Ctx(ctx)
 
 	requestedDid := strings.ToLower(strings.TrimPrefix(req.URL.Path, "/"))
-	var entry PLCLogEntry
-	err = s.db.Model(&entry).Where("did = ? AND (NOT nullified)", requestedDid).Order("plc_timestamp desc").Limit(1).Take(&entry).Error
+	entry, err := s.db.LastOperationForDID(ctx, requestedDid)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		updateMetrics(http.StatusNotFound)
 		return respond.NotFound("unknown DID")

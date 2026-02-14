@@ -15,9 +15,8 @@ import (
 	"github.com/rs/zerolog"
 	"golang.org/x/time/rate"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
-	"bsky.watch/plc-mirror/models"
+	v1 "bsky.watch/plc-mirror/schema/v1"
 	"bsky.watch/plc-mirror/util/pglock"
 	"bsky.watch/plc-mirror/util/plc"
 )
@@ -29,19 +28,8 @@ const (
 	caughtUpThreshold = 10 * time.Minute
 )
 
-type PLCLogEntry struct {
-	ID        models.ID `gorm:"primarykey"`
-	CreatedAt time.Time
-
-	DID          string        `gorm:"column:did;index:did_timestamp;uniqueIndex:did_cid"`
-	CID          string        `gorm:"column:cid;uniqueIndex:did_cid"`
-	PLCTimestamp string        `gorm:"column:plc_timestamp;index:did_timestamp,sort:desc;index:,sort:desc"`
-	Nullified    bool          `gorm:"default:false"`
-	Operation    plc.Operation `gorm:"type:JSONB;serializer:json"`
-}
-
 type Mirror struct {
-	db       *gorm.DB
+	db       *v1.Database
 	dbUrl    string
 	upstream *url.URL
 	limiter  *rate.Limiter
@@ -51,7 +39,7 @@ type Mirror struct {
 	lastCompletionTimestamp time.Time
 }
 
-func NewMirror(ctx context.Context, cfg Config, db *gorm.DB) (*Mirror, error) {
+func NewMirror(ctx context.Context, cfg Config, db *v1.Database) (*Mirror, error) {
 	u, err := url.Parse(cfg.Upstream)
 	if err != nil {
 		return nil, err
@@ -131,8 +119,7 @@ func (m *Mirror) LastCompletion() time.Time {
 }
 
 func (m *Mirror) LastRecordTimestamp(ctx context.Context) (time.Time, error) {
-	ts := ""
-	err := m.db.WithContext(ctx).Model(&PLCLogEntry{}).Select("plc_timestamp").Order("plc_timestamp desc").Limit(1).Take(&ts).Error
+	ts, err := m.db.HeadTimestamp(ctx)
 	if err != nil {
 		return time.Time{}, err
 	}
@@ -157,8 +144,7 @@ func (m *Mirror) updateRateLimit(lastRecordTimestamp time.Time) {
 func (m *Mirror) runOnce(ctx context.Context, leaderLock *pglock.Lock) error {
 	log := zerolog.Ctx(ctx)
 
-	cursor := ""
-	err := m.db.Model(&PLCLogEntry{}).Select("plc_timestamp").Order("plc_timestamp desc").Limit(1).Take(&cursor).Error
+	cursor, err := m.db.HeadTimestamp(ctx)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return fmt.Errorf("failed to get the cursor: %w", err)
 	}
@@ -198,7 +184,7 @@ func (m *Mirror) runOnce(ctx context.Context, leaderLock *pglock.Lock) error {
 			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 		}
 
-		newEntries := []PLCLogEntry{}
+		newEntries := []plc.OperationLogEntry{}
 		decoder := json.NewDecoder(resp.Body)
 		oldCursor := cursor
 
@@ -215,15 +201,14 @@ func (m *Mirror) runOnce(ctx context.Context, leaderLock *pglock.Lock) error {
 			}
 
 			cursor = entry.CreatedAt
-			row := *FromOperationLogEntry(entry)
-			newEntries = append(newEntries, row)
+			newEntries = append(newEntries, entry)
 
-			t, err := time.Parse(time.RFC3339, row.PLCTimestamp)
+			t, err := time.Parse(time.RFC3339, entry.CreatedAt)
 			if err == nil {
 				lastEventTimestamp.Set(float64(t.Unix()))
 				lastTimestamp = t
 			} else {
-				log.Warn().Msgf("Failed to parse %q: %s", row.PLCTimestamp, err)
+				log.Warn().Msgf("Failed to parse %q: %s", entry.CreatedAt, err)
 			}
 		}
 
@@ -240,12 +225,7 @@ func (m *Mirror) runOnce(ctx context.Context, leaderLock *pglock.Lock) error {
 			return nil
 		}
 
-		err = m.db.Clauses(
-			clause.OnConflict{
-				Columns:   []clause.Column{{Name: "did"}, {Name: "cid"}},
-				DoNothing: true,
-			},
-		).Create(newEntries).Error
+		err = m.db.AppendEntries(ctx, newEntries)
 		if err != nil {
 			return fmt.Errorf("inserting log entry into database: %w", err)
 		}
@@ -257,14 +237,4 @@ func (m *Mirror) runOnce(ctx context.Context, leaderLock *pglock.Lock) error {
 		log.Info().Msgf("Got %d log entries. New cursor: %q", len(newEntries), cursor)
 	}
 	return nil
-}
-
-func FromOperationLogEntry(op plc.OperationLogEntry) *PLCLogEntry {
-	return &PLCLogEntry{
-		DID:          op.DID,
-		CID:          op.CID,
-		PLCTimestamp: op.CreatedAt,
-		Nullified:    op.Nullified,
-		Operation:    op.Operation,
-	}
 }
