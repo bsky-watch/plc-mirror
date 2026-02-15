@@ -36,6 +36,10 @@ func (l *Lock) Lock(ctx context.Context) error {
 
 	_, err := l.conn.Exec(ctx, "select pg_advisory_lock($1)", l.lockID)
 	if err != nil {
+		if l.conn.Conn().IsClosed() {
+			// This is not recoverable without calling Reset()
+			l.err = err
+		}
 		return fmt.Errorf("acquiring lock: %w", err)
 	}
 	l.lockCount++
@@ -57,6 +61,10 @@ func (l *Lock) TryLock(ctx context.Context) (bool, error) {
 	var result bool
 	err := l.conn.QueryRow(ctx, "select pg_try_advisory_lock($1)", l.lockID).Scan(&result)
 	if err != nil {
+		if l.conn.Conn().IsClosed() {
+			// This is not recoverable without calling Reset()
+			l.err = err
+		}
 		return false, fmt.Errorf("acquiring lock: %w", err)
 	}
 	if result {
