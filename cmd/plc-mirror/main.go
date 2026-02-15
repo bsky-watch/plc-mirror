@@ -55,8 +55,8 @@ func runMain(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("parsing DB URL: %w", err)
 	}
-	dbCfg.MaxConns = 1024
-	dbCfg.MinConns = 10
+	dbCfg.MaxConns = 8
+	dbCfg.MinConns = 3
 	dbCfg.MaxConnLifetime = 6 * time.Hour
 	conn, err := pgxpool.NewWithConfig(ctx, dbCfg)
 	if err != nil {
