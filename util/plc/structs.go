@@ -70,10 +70,10 @@ type Operation struct {
 }
 
 type OperationLogEntry struct {
-	DID       string    `json:"did"`
+	DID       string    `json:"did,omitempty"`
 	Operation Operation `json:"operation"`
 	CID       string    `json:"cid"`
-	Nullified bool      `json:"nullified"`
+	Nullified bool      `json:"nullified,omitempty"`
 	CreatedAt string    `json:"createdAt"`
 }
 

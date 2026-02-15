@@ -6,9 +6,28 @@ import (
 
 	"bsky.watch/plc-mirror/models"
 	"bsky.watch/plc-mirror/util/plc"
+	"github.com/imax9000/errors"
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+func IsActive(ctx context.Context, db *gorm.DB) (bool, error) {
+	var entry PLCLogEntry
+	err := db.WithContext(ctx).Limit(1).Take(&entry).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, nil
+		}
+		if err, ok := errors.As[*pgconn.PgError](err); ok {
+			if err.Code == "42P01" {
+				return false, nil
+			}
+		}
+		return false, err
+	}
+	return true, nil
+}
 
 type PLCLogEntry struct {
 	ID        models.ID `gorm:"primarykey"`
