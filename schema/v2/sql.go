@@ -23,3 +23,5 @@ $end$ language plpgsql`
 const installTrigger = `create or replace trigger v2_update_head_timestamp
 after insert or update on data
 for each row execute function v2_update_head_timestamp()`
+
+const deleteTrigger = `drop trigger if exists v2_update_head_timestamp on data`

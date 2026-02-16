@@ -3,6 +3,7 @@ package v2
 import (
 	"cmp"
 	"context"
+	"flag"
 	"fmt"
 	"slices"
 
@@ -11,6 +12,10 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+)
+
+var (
+	useTrigger = flag.Bool("schemav2-update-head-timestamp-with-trigger", true, "If set to true, head timestamp will be kept up to date using a PostgreSQL trigger, rather than from business logic. WARNING: if you run multiple replicas, while switching this off a few log entries might get duplicated.")
 )
 
 func IsActive(ctx context.Context, db *gorm.DB) (bool, error) {
@@ -62,11 +67,17 @@ func (d *Database) AutoMigrate() error {
 		return fmt.Errorf("auto-migration: %w", err)
 	}
 
-	if err := d.db.Exec(triggerFunction).Error; err != nil {
-		return fmt.Errorf("creating trigger function: %w", err)
-	}
-	if err := d.db.Exec(installTrigger).Error; err != nil {
-		return fmt.Errorf("installing the trigger: %w", err)
+	if *useTrigger {
+		if err := d.db.Exec(triggerFunction).Error; err != nil {
+			return fmt.Errorf("creating trigger function: %w", err)
+		}
+		if err := d.db.Exec(installTrigger).Error; err != nil {
+			return fmt.Errorf("installing the trigger: %w", err)
+		}
+	} else {
+		if err := d.db.Exec(deleteTrigger).Error; err != nil {
+			return fmt.Errorf("ensuring that the trigger is not installed: %w", err)
+		}
 	}
 
 	// Ensure there's exactly one row in head_timestamp table.
@@ -110,6 +121,13 @@ func (d *Database) HeadTimestamp(ctx context.Context) (string, error) {
 }
 
 func (d *Database) AppendEntries(ctx context.Context, entries []plc.OperationLogEntry) error {
+	if len(entries) == 0 {
+		return nil
+	}
+	headTimestamp := plc.NextCursor(entries)
+	if headTimestamp == "" {
+		return fmt.Errorf("failed to get the new head timestamp")
+	}
 
 	// Sort in the reverse order, so that while iterating over the list
 	// and append()'ing to per-DID slices the newest entry will be
@@ -130,14 +148,23 @@ func (d *Database) AppendEntries(ctx context.Context, entries []plc.OperationLog
 		rows = append(rows, DIDTableEntry{DID: did, Log: entries})
 	}
 
-	return d.db.Clauses(
-		clause.OnConflict{
-			Columns: []clause.Column{{Name: "did"}},
-			DoUpdates: clause.Assignments(map[string]interface{}{
-				"log": gorm.Expr("array_cat(EXCLUDED.log, data.log)"),
-			}),
-		},
-	).Create(rows).Error
+	return d.db.Transaction(func(tx *gorm.DB) error {
+		if !*useTrigger {
+			err := tx.Raw("update head_timestamp set timestamp = ? where timestamp < ?", headTimestamp, headTimestamp).Error
+			if err != nil {
+				return fmt.Errorf("updating head timestamp: %w", err)
+			}
+		}
+
+		return tx.Clauses(
+			clause.OnConflict{
+				Columns: []clause.Column{{Name: "did"}},
+				DoUpdates: clause.Assignments(map[string]interface{}{
+					"log": gorm.Expr("array_cat(EXCLUDED.log, data.log)"),
+				}),
+			},
+		).Create(rows).Error
+	})
 }
 
 func (d *Database) LastOperationForDID(ctx context.Context, did string) (*plc.OperationLogEntry, error) {
