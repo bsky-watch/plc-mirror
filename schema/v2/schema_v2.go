@@ -150,7 +150,7 @@ func (d *Database) AppendEntries(ctx context.Context, entries []plc.OperationLog
 
 	return d.db.Transaction(func(tx *gorm.DB) error {
 		if !*useTrigger {
-			err := tx.Raw("update head_timestamp set timestamp = ? where timestamp < ?", headTimestamp, headTimestamp).Error
+			err := tx.Exec("update head_timestamp set timestamp = ? where timestamp < ?", headTimestamp, headTimestamp).Error
 			if err != nil {
 				return fmt.Errorf("updating head timestamp: %w", err)
 			}
