@@ -147,3 +147,16 @@ func (o Tombstone) CID() (cid.Cid, error) {
 func (o LegacyCreateOp) CID() (cid.Cid, error) {
 	return calculateCid(&o)
 }
+
+func NextCursor(entries []OperationLogEntry) string {
+	if len(entries) == 0 {
+		return ""
+	}
+	cursor := entries[0].CreatedAt
+	for _, entry := range entries {
+		if entry.CreatedAt > cursor {
+			cursor = entry.CreatedAt
+		}
+	}
+	return cursor
+}

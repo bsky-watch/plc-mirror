@@ -204,7 +204,6 @@ func (m *Mirror) runOnce(ctx context.Context, leaderLock *pglock.Lock) error {
 				return fmt.Errorf("parsing log entry: %w", err)
 			}
 
-			cursor = entry.CreatedAt
 			newEntries = append(newEntries, entry)
 
 			t, err := time.Parse(time.RFC3339, entry.CreatedAt)
@@ -216,7 +215,13 @@ func (m *Mirror) runOnce(ctx context.Context, leaderLock *pglock.Lock) error {
 			}
 		}
 
-		if len(newEntries) == 0 || cursor == oldCursor {
+		if len(newEntries) == 0 {
+			break
+		}
+
+		cursor = plc.NextCursor(newEntries)
+		if cursor == oldCursor {
+			// Shouldn't happen
 			break
 		}
 
