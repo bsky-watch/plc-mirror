@@ -3,7 +3,6 @@ package pglock
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -73,21 +72,6 @@ func (l *Lock) TryLock(ctx context.Context) (bool, error) {
 	}
 
 	return false, nil
-}
-
-func (l *Lock) LockWithTimeout(ctx context.Context, timeout time.Duration) (bool, error) {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	err := l.Lock(ctx)
-	if err != nil {
-		if err == context.DeadlineExceeded {
-			return false, nil
-		}
-		return false, err
-	}
-
-	return true, nil
 }
 
 func (l *Lock) Unlock(ctx context.Context) error {
