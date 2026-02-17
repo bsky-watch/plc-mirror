@@ -15,7 +15,7 @@ import (
 )
 
 var (
-	useTrigger = flag.Bool("schemav2-update-head-timestamp-with-trigger", true, "If set to true, head timestamp will be kept up to date using a PostgreSQL trigger, rather than from business logic. WARNING: if you run multiple replicas, while switching this off a few log entries might get duplicated.")
+	useTrigger = flag.Bool("schemav2-update-head-timestamp-with-trigger", false, "If set to true, head timestamp will be kept up to date using a PostgreSQL trigger, rather than from business logic. WARNING: if you run multiple replicas, while switching this off a few log entries might get duplicated.")
 )
 
 func IsActive(ctx context.Context, db *gorm.DB) (bool, error) {
